@@ -3,6 +3,8 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     database_url: str
+    firebase_credentials_path: str
+    firebase_web_api_key: str
     environment: str = "development"
 
     class Config:

@@ -1,4 +1,4 @@
-create extensions if not exists "pycrypto";
+create extension if not exists "pgcrypto";
 
 create table households(
     id uuid primary key default gen_random_uuid(),
@@ -8,7 +8,7 @@ create table households(
 
 create table members(
     id uuid primary key default gen_random_uuid(),
-    household_id_uuid not null references households(id) on delete cascade,
+    household_id uuid not null references households(id) on delete cascade,
     firebase_uid text not null unique,
     display_name text not null,
     is_admin boolean not null default false,
