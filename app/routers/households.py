@@ -17,10 +17,10 @@ async def create_household(body: HouseholdCreate, uid: str = Depends(get_current
         )
         await conn.execute(
                 "INSERT INTO members (household_id, firebase_uid, display_name, is_admin) VALUES ($1, $2, $3, $4)",
-                household_id["id"], uid,body.display_name, True
+                household["id"], uid,body.display_name, True
             )
         
-    return household
+    return dict(household)
 
 
 @router.post("/households/{household_id}/invite", response_model=InviteOut)
@@ -65,7 +65,7 @@ async def accept_invite(code: str, body: InviteAccept, uid: str = Depends(get_cu
         await conn.execute(
             "update invites set used_by = $1 where code = $2", member['id'], code
         )
-    return member
+    return dict(member)
 
 @router.get("/households/{household_id}/members", response_model=list[MemberOut])
 async def list_members(household_id: str, uid: str = Depends(get_current_user)):
@@ -78,7 +78,7 @@ async def list_members(household_id: str, uid: str = Depends(get_current_user)):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this household")
         
         members = await conn.fetch(
-            "SELECT household_id, display_name, is_admin, joined_at FROM members WHERE household_id=$1",
+            "SELECT id, household_id, display_name, is_admin, joined_at FROM members WHERE household_id=$1",
             household_id
         )
-    return members
+    return [dict(m) for m in members]

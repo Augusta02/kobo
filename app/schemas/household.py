@@ -13,7 +13,7 @@ class HouseholdOut(BaseModel):
     created_at: datetime
 
 class MemberOut(BaseModel):
-    id: str
+    id: UUID
     household_id: UUID
     display_name: str
     is_admin: bool
