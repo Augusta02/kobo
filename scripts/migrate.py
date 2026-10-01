@@ -3,7 +3,7 @@ from pathlib import Path
 import asyncpg
 from app.core.config import get_settings
 
-MIGRATIONS_DIR = Path(__file__).parent / "app" / "db" / "migrations"
+MIGRATIONS_DIR = Path(__file__).parent.parent / "app" / "db" / "migrations"
 
 async def run_migrations() -> None:
     settings = get_settings()
