@@ -1,25 +1,30 @@
+﻿from decimal import Decimal, ROUND_DOWN
 
-# bills calculations and splitting logic 
+kobo = Decimal("0.01")
 
-def split_amount(total_amount, participants_ids, payer_id):
+
+def split_amount(
+    total: Decimal,
+    participant_ids: list[str],
+    contributions: dict[str, Decimal] | None = None,
+) -> dict[str, Decimal]:
+    """Split a total evenly across participants, to the kobo.
+
+    contributions maps a member_id to what they've already put in.
+    Anyone not in it is assumed to have contributed nothing yet.
+    Any leftover kobo from rounding goes to whoever contributed the
+    most, or the first participant if nobody's contributed anything.
     """
-    Splits the total amount evenly among the number of people.
-    Any leftover from integer division goes to the payer
-    so the shares always sum back to the total amount.
-    Args:
-        total_amount (float): The total amount to be split.
-        participants_ids (list): List of participant IDs.
-        payer_id (str): The ID of the person who paid the total amount.
-        
-    Returns:
-        float: The amount each person should pay.
-    """
-    if payer_id not in participants_ids:
-        raise ValueError("Payer must be a participant.")
+    contributions = contributions or {}
+    share_count = len(participant_ids)
+    base_share = (total / share_count).quantize(kobo, rounding=ROUND_DOWN)
+    remainder = total - (base_share * share_count)
 
-    share_count = len(participants_ids)
-    base_share, remainder = divmod(total_amount, share_count)
+    shares = {person_id: base_share for person_id in participant_ids}
 
-    shares = {person_id: base_share for person_id in participants_ids}
-    shares[payer_id] += remainder
+    if remainder:
+        relevant = {pid: amt for pid, amt in contributions.items() if pid in shares}
+        absorber = max(relevant, key=relevant.get) if relevant else participant_ids[0]
+        shares[absorber] += remainder
+
     return shares

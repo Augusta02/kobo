@@ -2,9 +2,8 @@ create table bills(
     id uuid primary key default gen_random_uuid(),
     household_id uuid not null references households(id) on delete cascade,
     name text not null, 
-    total_amount integer not null,
+    total_amount numeric(12, 2) not null,
     num_days integer not null,
-    payer_id uuid not null references members(id),
     created_at timestamptz not null default now()
 );
 
