@@ -15,6 +15,7 @@ MIGRATION_ORDER = [
     "add_bills.sql",
     "bill_contributions.sql",
     "one_admin_per_household.sql",
+    "add_expenses.sql",
 ]
 
 
@@ -48,3 +49,4 @@ async def run_migrations() -> None:
 
 if __name__ == "__main__":
     asyncio.run(run_migrations())
+asyncio.run(run_migrations())
