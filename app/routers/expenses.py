@@ -4,6 +4,7 @@ from app.db.pool import get_pool
 from app.schemas.expense import ExpenseCreate, ExpenseOut
 from app.services.receipts import process_receipt
 from app.services.splitting import split_amount
+from decimal import Decimal
 
 router = APIRouter(tags=["expenses"])
 
@@ -60,9 +61,10 @@ async def create_expense(household_id: str, body: ExpenseCreate, uid: str = Depe
             body.total_amount, [str(pid) for pid in body.participant_ids], contributions_by_member
             )
         for member_id, share_amount in shares.items():
+            already_contributed = contributions_by_member.get(member_id, Decimal("0.00")) >= share_amount
             await conn.execute(
-                "INSERT INTO expense_splits (expense_id, member_id, share_amount) VALUES ($1, $2, $3)",
-                expense_id, member_id, share_amount
+                "INSERT INTO expense_splits (expense_id, member_id, share_amount, paid) VALUES ($1, $2, $3, $4)",
+                expense_id, member_id, share_amount, already_contributed
             )
 
         return await _fetch_expense_out(conn, expense_id)
@@ -75,3 +77,15 @@ async def list_expenses(household_id: str, uid: str = Depends(get_current_user))
             "SELECT id FROM expenses WHERE household_id=$1 ORDER BY created_at DESC", household_id
         )
         return [await _fetch_expense_out(conn, expense["id"]) for expense in expenses]
+
+@router.patch("/households/{household_id}/expenses/{expense_id}/splits/{member_id}/settle", response_model=ExpenseOut)
+async def settle_expense_split(household_id: str, expense_id: str, member_id: str, uid: str = Depends(get_current_user)):
+    async with get_pool().acquire() as conn, conn.transaction():
+        await _assert_member(conn, household_id, uid)
+        result = await conn.execute(
+            "UPDATE expense_splits SET paid=true WHERE expense_id=$1 AND member_id=$2",
+            expense_id, member_id,
+        )
+        if result == "UPDATE 0":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Split not found")
+        return await _fetch_expense_out(conn, expense_id)

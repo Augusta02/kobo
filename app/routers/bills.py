@@ -1,9 +1,9 @@
 ﻿from fastapi import APIRouter, Depends, HTTPException, status
-
 from app.core.security import get_current_user
 from app.db.pool import get_pool
 from app.schemas.bill import BillCreate, BillOut, BillUpdate
 from app.services.splitting import split_amount
+from decimal import Decimal
 
 router = APIRouter(tags=["bills"])
 
@@ -31,9 +31,10 @@ async def _write_splits(conn, bill_id, total_amount, participant_ids, contributi
 
     shares = split_amount(total_amount, [str(pid) for pid in participant_ids], contributions_by_member)
     for member_id, share_amount in shares.items():
+        already_contributed = contributions_by_member.get(member_id, Decimal("0.00")) >= share_amount
         await conn.execute(
-            "INSERT INTO bill_splits (bill_id, member_id, share_amount) VALUES ($1, $2, $3)",
-            bill_id, member_id, share_amount,
+            "INSERT INTO bill_splits (bill_id, member_id, share_amount, paid) VALUES ($1, $2, $3, $4)",
+            bill_id, member_id, share_amount, already_contributed,
         )
 
 
@@ -116,6 +117,19 @@ async def update_bill(household_id: str, bill_id: str, body: BillUpdate, uid: st
 
             await _write_splits(conn, bill_id, total_amount, participant_ids, contributions)
 
+        return await _fetch_bill_out(conn, bill_id)
+
+
+@router.patch("/households/{household_id}/bills/{bill_id}/splits/{member_id}/settle", response_model=BillOut)
+async def settle_bill_split(household_id: str, bill_id: str, member_id: str, uid: str = Depends(get_current_user)):
+    async with get_pool().acquire() as conn, conn.transaction():
+        await _assert_member(conn, household_id, uid)
+        result = await conn.execute(
+            "UPDATE bill_splits SET paid=true WHERE bill_id=$1 AND member_id=$2",
+            bill_id, member_id,
+        )
+        if result == "UPDATE 0":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Split not found")
         return await _fetch_bill_out(conn, bill_id)
 
 
