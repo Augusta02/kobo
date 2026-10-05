@@ -9,3 +9,4 @@ boto3>=1.35
 apscheduler>=3.10
 httpx>=0.27
 python-multipart>=0.0.12firebase-admin>=6.5
+boto3>=1.35

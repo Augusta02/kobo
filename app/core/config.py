@@ -5,6 +5,10 @@ class Settings(BaseSettings):
     database_url: str
     firebase_credentials_path: str
     firebase_web_api_key: str
+    aws_access_key_id: str
+    aws_secret_access_key: str
+    aws_region: str
+    s3_bucket_name: str
     environment: str = "development"
 
     class Config:
