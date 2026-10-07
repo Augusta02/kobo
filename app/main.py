@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from app.db import pool
 from app.core.firebase import init_firebase
-from app.routers import bills, expenses, households
+from app.routers import bills, expenses, households, rotations, goals, devices
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -16,6 +16,9 @@ app = FastAPI(lifespan=lifespan)
 app.include_router(households.router)
 app.include_router(bills.router)
 app.include_router(expenses.router)
+app.include_router(rotations.router)
+app.include_router(goals.router)
+app.include_router(devices.router)
 
 @app.get("/health")
 async def health_check():

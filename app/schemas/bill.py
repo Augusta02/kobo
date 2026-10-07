@@ -1,7 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
-
+from datetime import date, datetime
 from pydantic import BaseModel
 
 
@@ -42,6 +42,9 @@ class BillOut(BaseModel):
     name: str
     total_amount: Decimal
     num_days: int
+    last_settled_at: date | None
+    next_due_date: date
+    is_due: bool
     created_at: datetime
     contributions: list[ContributionOut]
     splits: list[BillSplitOut]

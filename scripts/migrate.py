@@ -16,6 +16,9 @@ MIGRATION_ORDER = [
     "bill_contributions.sql",
     "one_admin_per_household.sql",
     "add_expenses.sql",
+    "add_rotations.sql",
+    "add_goals.sql",
+    "add_device_tokens.sql"
 ]
 
 

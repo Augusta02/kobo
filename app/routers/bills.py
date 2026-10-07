@@ -3,6 +3,8 @@ from app.core.security import get_current_user
 from app.db.pool import get_pool
 from app.schemas.bill import BillCreate, BillOut, BillUpdate
 from app.services.splitting import split_amount
+from datetime import date
+from app.services import rotation_engine
 from decimal import Decimal
 
 router = APIRouter(tags=["bills"])
@@ -40,7 +42,7 @@ async def _write_splits(conn, bill_id, total_amount, participant_ids, contributi
 
 async def _fetch_bill_out(conn, bill_id) -> dict:
     bill = await conn.fetchrow(
-        "SELECT id, name, total_amount, num_days, created_at FROM bills WHERE id=$1", bill_id
+        "SELECT id, name, total_amount, num_days, last_settled_at, created_at FROM bills WHERE id=$1", bill_id
     )
     contributions = await conn.fetch(
         "SELECT member_id, amount_contributed FROM bill_contributions WHERE bill_id=$1", bill_id
@@ -48,8 +50,13 @@ async def _fetch_bill_out(conn, bill_id) -> dict:
     splits = await conn.fetch(
         "SELECT member_id, share_amount, paid FROM bill_splits WHERE bill_id=$1", bill_id
     )
+
+    next_due_date = rotation_engine.next_due(bill["last_settled_at"], bill["num_days"])
+
     return {
         **dict(bill),
+        "next_due_date": next_due_date,
+        "is_due": rotation_engine.is_due(next_due_date),
         "contributions": [dict(c) for c in contributions],
         "splits": [dict(s) for s in splits],
     }
@@ -132,7 +139,19 @@ async def settle_bill_split(household_id: str, bill_id: str, member_id: str, uid
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Split not found")
         return await _fetch_bill_out(conn, bill_id)
 
+@router.patch("/households/{household_id}/bills/{bill_id}/settle-cycle", response_model=BillOut)
+async def settle_bill_cycle(household_id: str, bill_id: str, uid: str = Depends(get_current_user)):
+    async with get_pool().acquire() as conn, conn.transaction():
+        await _assert_member(conn, household_id, uid)
+        result = await conn.execute(
+            "UPDATE bills SET last_settled_at=$1 WHERE id=$2 AND household_id=$3",
+            date.today(), bill_id, household_id,
+        )
+        if result == "UPDATE 0":
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "Bill not found")
+        return await _fetch_bill_out(conn, bill_id)
 
+        
 @router.delete("/households/{household_id}/bills/{bill_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_bill(household_id: str, bill_id: str, uid: str = Depends(get_current_user)):
     async with get_pool().acquire() as conn, conn.transaction():
