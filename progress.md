@@ -62,3 +62,59 @@ Application code
 - Same error on GET /households/{id}/members, for two reasons at once: the SQL's SELECT was missing the `id` column entirely even though the response schema required it, and the list of rows wasn't converted to dicts the way the single-row endpoints were. Fixed by adding `id` to the SELECT and returning `[dict(m) for m in members]`.
 - Same error again on a second pass over that same endpoint, after household_id was added to the MemberOut schema without updating the query to select it, and because MemberOut's `id` field was typed as plain `str` while asyncpg returns a real `UUID` object for a uuid column. Fixed by changing the schema's `id` field to type `UUID` and adding `household_id` back into the SELECT.
 - `UniqueViolationError` on `members_firebase_uid_key` when re-testing create_household with a token that had already been used once. Not a bug, the constraint was doing exactly what it should, one Firebase account can only ever belong to one household. The earlier "successful" attempt had actually already inserted the row, the error at the time came from response serialization after the transaction had committed, not from the insert itself.
+## Phase 2 — Bills, completed
+- bills and bill_splits tables, later reworked from a single payer_id to a contributions model: anyone can have already put money toward a bill, split still happens equally across every participant
+- create, list, patch, delete, all tested with three real members
+- a partial unique index enforces exactly one admin per household at the database level, plus a transfer-admin route for handing it to someone else
+- decided against a member cap, a household can hold as many people as it needs
+
+
+## Phase 3 — Expenses and receipts, completed
+- AWS S3 for storing receipt photos, AWS Textract's AnalyzeExpense for reading totals off them, chosen over a per-call vision LLM for cost
+- app/services/receipts.py, uploads a photo and returns its parsed total, tested standalone against a real receipt before any route touched it
+- expenses, expense_contributions, expense_splits, same shape as bills
+- scan-receipt is a separate step from create_expense on purpose, extraction first, person confirms or corrects the total, then it gets saved, matching the original spec
+- settle routes added for both bills and expenses, a split can be marked paid manually
+- a split now also gets marked paid automatically at creation time, if someone's contribution already covers their own share, they were never owing anything to begin with, forcing a manual settle on that case made no sense
+
+
+- Editing a migration file after Postgres already recorded it as applied doesn't make the new version run. Hit this twice, once when total_amount and share_amount were meant to become numeric(12,2) but the actual column stayed integer, and once with the filename-numbering cleanup. Fix is always the same: drop the affected tables, delete the matching row from schema_migrations, then rerun.
+- .env values wrapped in quotes, 'like-this', get written into the file literally, quote marks included, though python-dotenv itself tolerates and strips them. Worth keeping values unquoted regardless.
+- Textract calls failed with SubscriptionRequiredException on a brand-new AWS account, even though S3 worked fine with the same keys. Cause was AWS's Free Plan, active for all accounts created after mid-2025, which blocks a specific list of services including Textract outright, not a delay. Fixed by upgrading to the Paid plan, existing credits carried over.
+- return await _fetch_expense_out(conn, expense_id) sat one indent level outside its async with conn block in create_expense, so the connection had already been released back to the pool by the time it ran. Same class of bug as the earlier list_bills return-inside-the-loop issue, watch indentation around early returns inside a transaction block.
+
+
+## Phase 4: Rotations - complete
+- Built rotation_engine.py (current_member, advance, next_due, is_due) with no type hints on internal functions, per preference
+- Tested rotation_engine standalone before touching the database
+- Migration add_rotations.sql applied (rotations, rotation_members, rotation_history)
+- Renamed interval_days to num_days in schema/router, then ALTER TABLE'd the already-applied column to match (no drop/rerun needed since no rotation data existed yet)
+- Built schemas/rotation.py and routers/rotations.py: create_rotation, list_rotations, complete_rotation - single payer always, no splits
+- Fixed rotations router showing under 'default' in Swagger - missing tags=['rotations'] on APIRouter
+- Tested end-to-end via Swagger: create_rotation correctly set is_due=true with no prior history, complete_rotation correctly advanced position, logged history, and recomputed next_due_date
+
+## Phase 5: Goals - complete
+- Reused split_amount from splitting.py for goals: equal share per participant at creation, remainder to first listed participant
+- goal_contributions logs open-ended contributions over time against a fixed share, unlike bills/expenses which settle once
+- Built schemas/goal.py and routers/goals.py: create_goal, list_goals, add_contribution, update_goal, delete_goal
+- update_goal recomputes each participant's share_amount when target_amount changes, using real contribution totals so far to decide who absorbs the rounding remainder - contributions themselves are untouched
+- delete_goal relies on ON DELETE CASCADE from goal_participants and goal_contributions, no manual cleanup needed
+- Tested end-to-end via Swagger: create with 3 participants, add a contribution, rename and retarget the goal, confirmed remainder correctly followed the real contributor
+
+## Phase 6 (in progress): device registration built
+- Added device_tokens table (member_id, token, unique on token)
+- Built schemas/device.py and routers/devices.py: register_device and unregister_device
+- register_device enforces a member can only register tokens against their own member_id
+- ON CONFLICT (token) DO UPDATE handles token reuse on reinstall without erroring
+- Not yet tested with a real FCM token - no mobile client exists yet to generate one
+- Next: the reminders job itself (apscheduler, checks rotations/bills due in 2 days or today, sends via FCM to registered tokens)
+
+## Phase 6: Notifications - complete
+- Added device_tokens table and registration/unregistration routes, scoped so a member can only register tokens against their own member_id
+- Built push.py wrapping firebase-admin's FCM messaging, run via asyncio.to_thread since the SDK call is synchronous
+- Built reminders.py: checks every rotation and bill, computes days until due via rotation_engine, notifies the current member for rotations and all participants for bills, only at exactly 2 days out or due today
+- Wired apscheduler to run the check daily at 8am via scheduler.py, started/stopped in main.py's lifespan
+- Added a manual trigger route (POST /jobs/reminders/run) since waiting for real due dates isn't practical for testing
+- Fixed several bugs during testing: missing date import, a memer_ids typo, check_rotations missing its conn parameter, notifiication/Notificiation typos in the FCM message construction
+- Tested end-to-end: forced a bill to be due today via direct SQL, triggered the job manually, confirmed the terminal printed the correct notification text with an empty token list (no real device registered yet)
+- Real push delivery to a phone remains untested until Phase 7 provides an actual mobile client to generate a device token
