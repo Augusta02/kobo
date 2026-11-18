@@ -8,6 +8,16 @@ from app.schemas.household import HouseholdCreate, HouseholdOut, InviteAccept, I
 
 router = APIRouter(tags=['households'])
 
+@router.get("/households/me", response_model=list[HouseholdOut])
+async def list_my_households(uid: str = Depends(get_current_user)):
+    async with get_pool().acquire() as conn:
+        rows = await conn.fetch(
+            "SELECT h.id, h.name, h.created_at FROM households h "
+            "JOIN members m ON m.household_id = h.id WHERE m.firebase_uid = $1",
+            uid,
+        )
+    return [dict(r) for r in rows]
+
 # Create a household and add the creator as an admin member
 @router.post("/households", response_model=HouseholdOut, status_code=status.HTTP_201_CREATED)
 async def create_household(body: HouseholdCreate, uid: str = Depends(get_current_user)):
@@ -59,7 +69,7 @@ async def accept_invite(code: str, body: InviteAccept, uid: str = Depends(get_cu
         
         member = await conn.fetchrow(
             "INSERT INTO members (household_id, firebase_uid, display_name) VALUES ($1, $2, $3) " 
-            "returning id, household_id, display_name, is_admin, joined_at",
+            "returning id, household_id, display_name, is_admin, joined_at, firebase_uid",
             invite["household_id"], uid, body.display_name
         )
         
@@ -80,7 +90,7 @@ async def list_members(household_id: str, uid: str = Depends(get_current_user)):
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this household")
         
         members = await conn.fetch(
-            "SELECT id, household_id, display_name, is_admin, joined_at FROM members WHERE household_id=$1",
+            "SELECT id, household_id, display_name, is_admin, joined_at, firebase_uid FROM members WHERE household_id=$1",
             household_id
         )
     return [dict(m) for m in members]
@@ -111,7 +121,7 @@ async def transfer_admin(household_id: str, member_id: str, uid: str = Depends(g
         )
         member = await conn.fetchrow(
             "UPDATE members SET is_admin=true WHERE id=$1 "
-            "RETURNING id, household_id, display_name, is_admin, joined_at",
+            "RETURNING id, household_id, display_name, is_admin, joined_at, firebase_uid",
             member_id,
         )
     return dict(member)

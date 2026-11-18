@@ -18,6 +18,7 @@ class MemberOut(BaseModel):
     display_name: str
     is_admin: bool
     joined_at: datetime
+    firebase_uid: str 
 
 class InviteOut(BaseModel):
     code: str

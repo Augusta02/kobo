@@ -149,6 +149,10 @@ async def settle_bill_cycle(household_id: str, bill_id: str, uid: str = Depends(
         )
         if result == "UPDATE 0":
             raise HTTPException(status.HTTP_404_NOT_FOUND, "Bill not found")
+        await conn.execute(
+            "UPDATE bill_splits SET paid=false WHERE bill_id=$1",
+            bill_id,
+        )
         return await _fetch_bill_out(conn, bill_id)
 
         

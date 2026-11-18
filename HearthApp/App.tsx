@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
 import { View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
+import { AuthProvider } from './src/lib/AuthContext';
 import {
   useFonts,
   Mulish_400Regular,
@@ -33,8 +34,10 @@ export default function App() {
   }
 
   return (
+    <AuthProvider>
     <View style={{ flex: 1 }} onLayout={onLayoutRootView}>
       <RootNavigator />
     </View>
+    </AuthProvider>
   );
 }
