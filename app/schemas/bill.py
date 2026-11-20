@@ -16,6 +16,7 @@ class BillCreate(BaseModel):
     num_days: int
     participant_ids: list[UUID]
     contributions: list[ContributionIn] = []
+    remind_days: int | None = None
 
 
 class BillUpdate(BaseModel):
@@ -24,6 +25,7 @@ class BillUpdate(BaseModel):
     num_days: int | None = None
     participant_ids: list[UUID] | None = None
     contributions: list[ContributionIn] | None = None
+    remind_days: int | None = None
 
 
 class ContributionOut(BaseModel):
@@ -42,9 +44,18 @@ class BillOut(BaseModel):
     name: str
     total_amount: Decimal
     num_days: int
+    remind_days: int | None
     last_settled_at: date | None
     next_due_date: date
     is_due: bool
     created_at: datetime
     contributions: list[ContributionOut]
     splits: list[BillSplitOut]
+
+
+class BillBalanceOut(BaseModel):
+    bill_id: UUID
+    bill_name: str
+    from_member_id: UUID
+    to_member_id: UUID
+    amount: Decimal

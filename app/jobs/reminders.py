@@ -31,11 +31,12 @@ async def check_rotations(conn):
             continue
         due_date = rotation_engine.next_due(rotation["last_completed_at"], rotation["num_days"])
         days_away = (due_date - date.today()).days
-        if days_away not in (0, 2):
+        remind_at = rotation["remind_days"] if rotation["remind_days"] is not None else 2
+        if days_away not in (0, remind_at):
             continue
         current_member_id = rotation_engine.current_member(participant_ids, rotation["current_position"])
         tokens = await _tokens_for_member(conn, current_member_id)
-        when = "today" if days_away == 0 else "in 2 days"
+        when = "today" if days_away == 0 else f"in {days_away} days"
         await push.send_push_notification(tokens, rotation["name"], f"It's your turn for {rotation['name']}, due {when}.")
 
 
@@ -44,14 +45,15 @@ async def check_bills(conn):
     for bill in bills:
         due_date = rotation_engine.next_due(bill["last_settled_at"], bill["num_days"])
         days_away = (due_date - date.today()).days
-        if days_away not in (0, 2):
+        remind_at = bill["remind_days"] if bill["remind_days"] is not None else 2
+        if days_away not in (0, remind_at):
             continue
         split_rows = await conn.fetch(
             "select member_id from bill_splits where bill_id = $1", bill["id"]
         )
         participant_ids = [r["member_id"] for r in split_rows]
         tokens = await _tokens_for_members(conn, participant_ids)
-        when = "today" if days_away == 0 else "in 2 days"
+        when = "today" if days_away == 0 else f"in {days_away} days"
         await push.send_push_notification(tokens, bill["name"], f"{bill['name']} is due {when}.")
 
 

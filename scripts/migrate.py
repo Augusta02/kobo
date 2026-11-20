@@ -18,7 +18,9 @@ MIGRATION_ORDER = [
     "add_expenses.sql",
     "add_rotations.sql",
     "add_goals.sql",
-    "add_device_tokens.sql"
+    "add_device_tokens.sql",
+    "rotation_remind_and_split.sql"
+
 ]
 
 

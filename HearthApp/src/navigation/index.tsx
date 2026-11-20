@@ -15,6 +15,8 @@ import { colors, fontFamily } from '../theme';
 import { useAuth } from '../lib/AuthContext';
 import LoginScreen from '../screens/LoginScreen';
 import EditBillScreen from '../screens/EditBillScreen';
+import EditRotationScreen from '../screens/EditRotationScreen';
+import EditGoalScreen from '../screens/EditGoalScreen';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -62,7 +64,9 @@ export default function RootNavigator() {
         <Stack.Screen name="AddContribution" component={AddContributionScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="CreateBill" component={CreateBillScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="EditBill" component={EditBillScreen} options={{ presentation: 'modal' }} />
+        <Stack.Screen name="EditRotation" component={EditRotationScreen} options={{ presentation: 'modal' }} />
         <Stack.Screen name="CreateGoal" component={CreateGoalScreen} options={{ presentation: 'modal' }} />
+        <Stack.Screen name="EditGoal" component={EditGoalScreen} options={{ presentation: 'modal' }} />
       </>
         ) : (
           <Stack.Screen name="Login" component={LoginScreen} />

@@ -15,6 +15,7 @@ type Bill = {
   name: string;
   total_amount: number;
   num_days: number;
+  remind_days: number | null;
   splits: BillSplit[];
 };
 
@@ -27,6 +28,7 @@ export default function EditBillScreen() {
   const [name, setName] = useState(bill.name);
   const [amount, setAmount] = useState(String(bill.total_amount));
   const [repeatsEvery, setRepeatsEvery] = useState(String(bill.num_days));
+  const [remind, setRemind] = useState(bill.remind_days != null ? String(bill.remind_days) : '2');
   const [splitWith, setSplitWith] = useState<string[]>(bill.splits.map((s) => s.member_id));
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +73,7 @@ export default function EditBillScreen() {
         name: trimmedName,
         total_amount: amountValue,
         num_days: numDaysValue,
+        remind_days: parseInt(remind, 10) || null,
         participant_ids: splitWith,
       });
       navigation.goBack();
@@ -108,23 +111,34 @@ export default function EditBillScreen() {
             <TextInput
               style={styles.amountInput}
               value={amount}
-              onChangeText={setAmount}
-              placeholder="0"
-              placeholderTextColor={colors.textSecondary}
-              keyboardType="numeric"
+              onChangeText={(text) => {
+                const cleaned = text.replace(/[^0-9.]/g, '');
+                const parts = cleaned.split('.');
+                setAmount(parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : cleaned);
+              }}
             />
           </View>
         </View>
 
-        <View>
-          <Text style={styles.label}>Repeats every</Text>
-          <TextInput
-            style={styles.input}
-            value={repeatsEvery}
-            onChangeText={setRepeatsEvery}
-            keyboardType="numeric"
-          />
-          <Text style={styles.suffix}>days</Text>
+        <View style={styles.row}>
+          <View style={styles.rowItem}>
+            <Text style={styles.label}>Repeats every</Text>
+            <TextInput
+              style={styles.input}
+              value={repeatsEvery}
+              onChangeText={(text) => setRepeatsEvery(text.replace(/[^0-9]/g, ''))}
+            />
+            <Text style={styles.suffix}>days</Text>
+          </View>
+          <View style={styles.rowItem}>
+            <Text style={styles.label}>Remind</Text>
+            <TextInput
+              style={styles.input}
+              value={remind}
+              onChangeText={(text) => setRemind(text.replace(/[^0-9]/g, ''))}
+            />
+            <Text style={styles.suffix}>days before</Text>
+          </View>
         </View>
 
         <View>
@@ -224,6 +238,13 @@ const styles = StyleSheet.create({
     fontSize: 18,
     color: colors.textPrimary,
     backgroundColor: colors.surface,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  rowItem: {
+    flex: 1,
   },
   suffix: {
     marginTop: 6,

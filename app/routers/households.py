@@ -1,9 +1,11 @@
 import secrets
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from app.core.security import get_current_user
 from app.db.pool import get_pool
-from app.schemas.household import HouseholdCreate, HouseholdOut, InviteAccept, InviteOut, MemberOut
+from app.schemas.household import HouseholdCreate, HouseholdOut, InviteAccept, InviteOut, MemberOut, BalanceOut
+from app.services.balances import simplify_debts
 
 
 router = APIRouter(tags=['households'])
@@ -125,3 +127,36 @@ async def transfer_admin(household_id: str, member_id: str, uid: str = Depends(g
             member_id,
         )
     return dict(member)
+
+# Who owes whom, simplified to the fewest transactions needed to settle up.
+# Scoped to ad-hoc expenses only — bills and rotations aren't person-to-person
+# debts until someone actually fronts the money, so they don't belong in this ledger.
+@router.get("/households/{household_id}/balances", response_model=list[BalanceOut])
+async def get_household_balances(household_id: str, uid: str = Depends(get_current_user)):
+    async with get_pool().acquire() as conn:
+        requester = await conn.fetchrow(
+            "SELECT 1 FROM members WHERE household_id=$1 AND firebase_uid=$2",
+            household_id, uid
+        )
+        if not requester:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this household")
+
+        net: dict = {}
+
+        expense_split_rows = await conn.fetch(
+            "SELECT es.member_id, es.share_amount FROM expense_splits es "
+            "JOIN expenses e ON e.id = es.expense_id WHERE e.household_id = $1",
+            household_id,
+        )
+        for row in expense_split_rows:
+            net[row["member_id"]] = net.get(row["member_id"], Decimal("0")) - row["share_amount"]
+
+        expense_contribution_rows = await conn.fetch(
+            "SELECT ec.member_id, ec.amount_contributed FROM expense_contributions ec "
+            "JOIN expenses e ON e.id = ec.expense_id WHERE e.household_id = $1",
+            household_id,
+        )
+        for row in expense_contribution_rows:
+            net[row["member_id"]] = net.get(row["member_id"], Decimal("0")) + row["amount_contributed"]
+
+        return simplify_debts(net)

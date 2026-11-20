@@ -60,6 +60,7 @@ export default function CreateBillScreen() {
         name: trimmedName,
         total_amount: amountValue,
         num_days: numDaysValue,
+        remind_days: parseInt(remind, 10) || null,
         participant_ids: splitWith,
         contributions: [],
       });
@@ -98,10 +99,13 @@ export default function CreateBillScreen() {
             <TextInput
               style={styles.amountInput}
               value={amount}
-              onChangeText={setAmount}
-              placeholder="0"
-              placeholderTextColor={colors.textSecondary}
-              keyboardType="numeric"
+              onChangeText={(text) => {
+                const cleaned = text.replace(/[^0-9.]/g, '');
+                const parts = cleaned.split('.');
+                setAmount(parts.length > 2 ? parts[0] + '.' + parts.slice(1).join('') : cleaned);
+            }}
+            placeholder="0"
+            placeholderTextColor={colors.textSecondary}
             />
           </View>
         </View>
@@ -112,8 +116,7 @@ export default function CreateBillScreen() {
             <TextInput
               style={styles.input}
               value={repeatsEvery}
-              onChangeText={setRepeatsEvery}
-              keyboardType="numeric"
+              onChangeText={(text) => setRepeatsEvery(text.replace(/[^0-9]/g, ''))}
             />
             <Text style={styles.suffix}>days</Text>
           </View>
@@ -122,8 +125,7 @@ export default function CreateBillScreen() {
             <TextInput
               style={styles.input}
               value={remind}
-              onChangeText={setRemind}
-              keyboardType="numeric"
+              onChangeText={(text) => setRemind(text.replace(/[^0-9]/g, ''))}
             />
             <Text style={styles.suffix}>days before</Text>
           </View>

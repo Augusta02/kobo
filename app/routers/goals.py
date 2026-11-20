@@ -18,6 +18,18 @@ async def _assert_member(conn, household_id, uid):
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a member of this household")
     return member
 
+async def _assert_household_members(conn, household_id, member_ids) -> None:
+    if not member_ids:
+        return
+    rows = await conn.fetch(
+        "select id from members where household_id = $1 and id = any($2::uuid[])",
+        household_id, list(member_ids),
+    )
+    found_ids = {r["id"] for r in rows}
+    missing = set(member_ids) - found_ids
+    if missing:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "All participants must be members of this household")
+
 
 async def _fetch_goal_out(conn, goal_id):
     goal = await conn.fetchrow("select * from goals where id = $1", goal_id)
@@ -68,6 +80,7 @@ async def _fetch_goal_out(conn, goal_id):
 async def create_goal(household_id: UUID, payload: GoalCreate, uid: str = Depends(get_current_user)):
     async with get_pool().acquire() as conn, conn.transaction():
         await _assert_member(conn, household_id, uid)
+        await _assert_household_members(conn, household_id, payload.participant_ids)
 
         shares = split_amount(payload.target_amount, payload.participant_ids, {})
 

@@ -1,6 +1,7 @@
-import { ScrollView, StyleSheet, Text, View, Pressable } from 'react-native';
+import { useState, useCallback } from 'react';
+import { ScrollView, StyleSheet, Text, View, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
+import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { Feather } from '@expo/vector-icons';
 import { useAuth } from '../lib/AuthContext';
 import Card from '../components/Card';
@@ -8,10 +9,129 @@ import Avatar from '../components/Avatar';
 import IconBadge from '../components/IconBadge';
 import MoneyText from '../components/MoneyText';
 import { colors, fontFamily, spacing, radius } from '../theme';
+import { api } from '../lib/apiClient';
+
+type BillSplit = { member_id: string; share_amount: number; paid: boolean };
+type Bill = {
+  id: string;
+  name: string;
+  total_amount: number;
+  num_days: number;
+  next_due_date: string | null;
+  is_due: boolean;
+  splits: BillSplit[];
+};
+
+type BillBalance = {
+  bill_id: string;
+  bill_name: string;
+  from_member_id: string;
+  to_member_id: string;
+  amount: number;
+};
+
+type Rotation = {
+  id: string;
+  name: string;
+  num_days: number;
+  current_member_id: string | null;
+  next_due_date: string | null;
+  is_due: boolean;
+  participant_ids: string[];
+};
+
+type Balance = { from_member_id: string; to_member_id: string; amount: number };
+
+function formatNaira(value: number) {
+  return `₦${Math.round(value).toLocaleString()}`;
+}
+
+function daysUntil(dateStr: string | null) {
+  if (!dateStr) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(dateStr);
+  due.setHours(0, 0, 0, 0);
+  return Math.round((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+function dueLabel(isDue: boolean, daysAway: number | null) {
+  if (isDue || (daysAway !== null && daysAway <= 0)) return 'due now';
+  if (daysAway === 1) return 'due tomorrow';
+  if (daysAway !== null) return `due in ${daysAway} days`;
+  return '';
+}
 
 export default function HomeScreen() {
   const navigation = useNavigation();
-  const { signOut } = useAuth();
+  const { household, member, members, signOut } = useAuth();
+  const [bills, setBills] = useState<Bill[]>([]);
+  const [billBalances, setBillBalances] = useState<BillBalance[]>([]);
+  const [rotations, setRotations] = useState<Rotation[]>([]);
+  const [balances, setBalances] = useState<Balance[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadData = useCallback(async () => {
+    if (!household) return;
+    setLoading(true);
+    try {
+      const [billsData, rotationsData, balancesData, billBalancesData] = await Promise.all([
+        api.get<Bill[]>(`/households/${household.id}/bills`),
+        api.get<Rotation[]>(`/households/${household.id}/rotations`),
+        api.get<Balance[]>(`/households/${household.id}/balances`),
+        api.get<BillBalance[]>(`/households/${household.id}/bill-balances`),
+      ]);
+      setBills(billsData);
+      setRotations(rotationsData);
+      setBalances(balancesData);
+      setBillBalances(billBalancesData);
+    } catch (err) {
+      console.error('Failed to load home data', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [household]);
+
+  useFocusEffect(
+    useCallback(() => {
+      loadData();
+    }, [loadData])
+  );
+
+  function displayNameFor(memberId: string | null) {
+    return members.find((m) => m.id === memberId)?.display_name ?? 'Unknown';
+  }
+
+  const myBalances = balances.filter(
+    (b) => b.from_member_id === member?.id || b.to_member_id === member?.id
+  );
+  const netBalance = myBalances.reduce((sum, b) => {
+    const amount = Number(b.amount);
+    return sum + (b.to_member_id === member?.id ? amount : -amount);
+  }, 0);
+
+  async function handleSettleBillSplit(billId: string, debtorMemberId: string) {
+    if (!household) return;
+    try {
+      await api.patch(`/households/${household.id}/bills/${billId}/splits/${debtorMemberId}/settle`);
+      loadData();
+    } catch (err) {
+      console.error('Failed to settle bill split', err);
+    }
+  }
+  
+  const myBillBalances = billBalances.filter(
+    (b) => b.from_member_id === member?.id || b.to_member_id === member?.id
+  );
+
+  const upcomingRotation = [...rotations]
+    .filter((r) => r.next_due_date)
+    .sort((a, b) => new Date(a.next_due_date!).getTime() - new Date(b.next_due_date!).getTime())[0];
+
+  const upcomingBills = [...bills]
+    .filter((b) => b.next_due_date)
+    .sort((a, b) => new Date(a.next_due_date!).getTime() - new Date(b.next_due_date!).getTime())
+    .slice(0, 2);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -26,56 +146,127 @@ export default function HomeScreen() {
           </Pressable>
         </View>
 
-        <Card style={styles.balanceCard}>
-          <Text style={styles.balanceLabel}>Your balance</Text>
-          <MoneyText amount="₦8,200" direction="in" size={32} style={styles.balanceAmount} />
-          <View style={styles.balanceRow}>
-            <Text style={styles.balanceLine}>Amaka owes you</Text>
-            <MoneyText amount="₦4,900" direction="in" size={14} />
-          </View>
-          <View style={styles.balanceRow}>
-            <Text style={styles.balanceLine}>Zainab owes you</Text>
-            <MoneyText amount="₦3,300" direction="in" size={14} />
-          </View>
-        </Card>
+        {loading ? (
+          <ActivityIndicator color={colors.primary} style={{ marginVertical: spacing.lg }} />
+        ) : (
+          <>
+            <Card style={styles.balanceCard}>
+              <Text style={styles.balanceLabel}>Your balance</Text>
+              <MoneyText
+                amount={formatNaira(Math.abs(netBalance))}
+                direction={netBalance >= 0 ? 'in' : 'out'}
+                size={32}
+                style={styles.balanceAmount}
+              />
+              {myBalances.length === 0 && (
+                <Text style={styles.balanceLine}>You're settled up.</Text>
+              )}
+              {myBalances.map((b, index) => {
+                const youAreOwed = b.to_member_id === member?.id;
+                const otherId = youAreOwed ? b.from_member_id : b.to_member_id;
+                return (
+                  <View key={index} style={styles.balanceRow}>
+                    <Text style={styles.balanceLine}>
+                      {youAreOwed ? `${displayNameFor(otherId)} owes you` : `You owe ${displayNameFor(otherId)}`}
+                    </Text>
+                    <MoneyText
+                      amount={formatNaira(Number(b.amount))}
+                      direction={youAreOwed ? 'in' : 'out'}
+                      size={14}
+                    />
+                  </View>
+                );
+              })}
+            </Card>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>This week</Text>
-        </View>
-        <Card style={styles.rowCard}>
-          <IconBadge tone="secondary">
-            <Feather name="droplet" size={18} color={colors.secondary} />
-          </IconBadge>
-          <View style={styles.rowBody}>
-            <Text style={styles.rowTitle}>Water refill</Text>
-            <Text style={styles.rowSubtitle}>Zainab's turn · due in 3 days</Text>
-          </View>
-          <Avatar initial="Z" variant="solid" size={34} />
-        </Card>
+            
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Coming up</Text>
-        </View>
-        <Card style={styles.rowCard}>
-          <IconBadge tone="primary">
-            <Feather name="wifi" size={18} color={colors.primary} />
-          </IconBadge>
-          <View style={styles.rowBody}>
-            <Text style={styles.rowTitle}>Internet</Text>
-            <Text style={styles.rowSubtitle}>due in 5 days</Text>
-          </View>
-          <MoneyText amount="₦4,000" direction="neutral" size={14} />
-        </Card>
-        <Card style={styles.rowCard}>
-          <IconBadge tone="secondary">
-            <Feather name="feather" size={18} color={colors.secondary} />
-          </IconBadge>
-          <View style={styles.rowBody}>
-            <Text style={styles.rowTitle}>Cleaning service</Text>
-            <Text style={styles.rowSubtitle}>due tomorrow</Text>
-          </View>
-          <MoneyText amount="₦3,433" direction="neutral" size={14} />
-        </Card>
+            {myBillBalances.length > 0 && (
+              <Card style={styles.balanceCard}>
+                <Text style={styles.balanceLabel}>Bills</Text>
+                {myBillBalances.map((b, index) => {
+                  const youAreOwed = b.to_member_id === member?.id;
+                  const otherId = youAreOwed ? b.from_member_id : b.to_member_id;
+                  return (
+                    <View key={index} style={styles.billBalanceRow}>
+                      <View style={styles.balanceRow}>
+                        <Text style={styles.balanceLine}>
+                          {youAreOwed ? `${displayNameFor(otherId)} owes you` : `You owe ${displayNameFor(otherId)}`}
+                        </Text>
+                        <MoneyText
+                          amount={formatNaira(Number(b.amount))}
+                          direction={youAreOwed ? 'in' : 'out'}
+                          size={14}
+                        />
+                      </View>
+                      <Text style={styles.billBalanceTag}>{b.bill_name}</Text>
+                      {youAreOwed && (
+                        <Pressable onPress={() => handleSettleBillSplit(b.bill_id, otherId)}>
+                          <Text style={styles.settleLink}>Mark paid</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  );
+                })}
+              </Card>
+            )}
+
+            
+
+            {upcomingRotation && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>This week</Text>
+                </View>
+                <Card style={styles.rowCard}>
+                  <IconBadge tone="secondary">
+                    <Feather name="refresh-cw" size={18} color={colors.secondary} />
+                  </IconBadge>
+                  <View style={styles.rowBody}>
+                    <Text style={styles.rowTitle}>{upcomingRotation.name}</Text>
+                    <Text style={styles.rowSubtitle}>
+                      {displayNameFor(upcomingRotation.current_member_id)}'s turn ·{' '}
+                      {dueLabel(upcomingRotation.is_due, daysUntil(upcomingRotation.next_due_date))}
+                    </Text>
+                  </View>
+                  <Avatar
+                    initial={displayNameFor(upcomingRotation.current_member_id).charAt(0).toUpperCase()}
+                    variant="solid"
+                    size={34}
+                  />
+                </Card>
+              </>
+            )}
+
+            {upcomingBills.length > 0 && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Coming up</Text>
+                </View>
+                {upcomingBills.map((bill, index) => (
+                  <Card key={bill.id} style={styles.rowCard}>
+                    <IconBadge tone={index % 2 === 0 ? 'primary' : 'secondary'}>
+                      <Feather
+                        name="credit-card"
+                        size={18}
+                        color={index % 2 === 0 ? colors.primary : colors.secondary}
+                      />
+                    </IconBadge>
+                    <View style={styles.rowBody}>
+                      <Text style={styles.rowTitle}>{bill.name}</Text>
+                      <Text style={styles.rowSubtitle}>{dueLabel(bill.is_due, daysUntil(bill.next_due_date))}</Text>
+                    </View>
+                    <MoneyText amount={formatNaira(bill.total_amount)} direction="neutral" size={14} />
+                  </Card>
+                ))}
+              </>
+            )}
+
+            {!upcomingRotation && upcomingBills.length === 0 && (
+              <Text style={styles.emptyText}>Nothing due right now.</Text>
+            )}
+          </>
+        )}
       </ScrollView>
 
       <Pressable style={styles.fab} onPress={() => navigation.navigate('LogExpense' as never)}>
@@ -137,6 +328,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textPrimary,
   },
+    billBalanceRow: {
+    marginBottom: spacing.sm,
+  },
+  billBalanceTag: {
+    fontFamily: fontFamily.regular,
+    fontSize: 11.5,
+    color: colors.textSecondary,
+    marginTop: 2,
+  },
+  settleLink: {
+    fontFamily: fontFamily.semibold,
+    fontSize: 12.5,
+    color: colors.primary,
+    marginTop: 4,
+  },
   sectionHeader: {
     marginTop: spacing.sm,
   },
@@ -163,6 +369,13 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.textSecondary,
     marginTop: 2,
+  },
+  emptyText: {
+    fontFamily: fontFamily.regular,
+    fontSize: 13,
+    color: colors.textSecondary,
+    textAlign: 'center',
+    marginVertical: spacing.lg,
   },
   fab: {
     position: 'absolute',

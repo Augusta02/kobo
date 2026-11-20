@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TextInput, View, Pressable } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View, Pressable, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import Avatar from '../components/Avatar';
@@ -7,26 +7,66 @@ import BackButton from '../components/BackButton';
 import PrimaryButton from '../components/PrimaryButton';
 import Card from '../components/Card';
 import { colors, fontFamily, radius, spacing } from '../theme';
-
-const people = [
-  { initial: 'N', name: 'Nene' },
-  { initial: 'A', name: 'Amaka' },
-  { initial: 'Z', name: 'Zainab' },
-];
+import { useAuth } from '../lib/AuthContext';
+import { api } from '../lib/apiClient';
 
 export default function CreateRotationScreen() {
   const navigation = useNavigation();
+  const { household, members } = useAuth();
   const [name, setName] = useState('');
   const [repeatsEvery, setRepeatsEvery] = useState('10');
   const [remind, setRemind] = useState('1');
-  const [selected, setSelected] = useState<string[]>(['N', 'A', 'Z']);
+  const [selected, setSelected] = useState<string[]>(() => members.map((m) => m.id));
   const [splitCost, setSplitCost] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const toggleSelected = (initial: string) => {
+  const toggleSelected = (memberId: string) => {
     setSelected((prev) =>
-      prev.includes(initial) ? prev.filter((item) => item !== initial) : [...prev, initial]
+      prev.includes(memberId) ? prev.filter((item) => item !== memberId) : [...prev, memberId]
     );
   };
+
+  async function handleSubmit() {
+    setError(null);
+
+    const trimmedName = name.trim();
+    const numDaysValue = parseInt(repeatsEvery, 10);
+
+    if (!trimmedName) {
+      setError('Give the rotation a name.');
+      return;
+    }
+    if (!numDaysValue || numDaysValue <= 0) {
+      setError('Enter a valid repeat interval.');
+      return;
+    }
+    if (selected.length === 0) {
+      setError('Pick at least one person to take turns.');
+      return;
+    }
+    if (!household) {
+      setError('No household loaded yet — try again in a moment.');
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await api.post(`/households/${household.id}/rotations`, {
+        name: trimmedName,
+        num_days: numDaysValue,
+        remind_days: parseInt(remind, 10) || null,
+        split_cost: splitCost,
+        participant_ids: selected,
+      });
+      navigation.goBack();
+    } catch (err) {
+      console.error('Failed to create rotation', err);
+      setError('Could not create the rotation. Check your connection and try again.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -53,8 +93,7 @@ export default function CreateRotationScreen() {
             <TextInput
               style={styles.input}
               value={repeatsEvery}
-              onChangeText={setRepeatsEvery}
-              keyboardType="numeric"
+              onChangeText={(text) => setRepeatsEvery(text.replace(/[^0-9]/g, ''))}
             />
             <Text style={styles.suffix}>days</Text>
           </View>
@@ -63,8 +102,7 @@ export default function CreateRotationScreen() {
             <TextInput
               style={styles.input}
               value={remind}
-              onChangeText={setRemind}
-              keyboardType="numeric"
+              onChangeText={(text) => setRemind(text.replace(/[^0-9]/g, ''))}
             />
             <Text style={styles.suffix}>days before</Text>
           </View>
@@ -73,16 +111,22 @@ export default function CreateRotationScreen() {
         <View>
           <Text style={styles.label}>Who takes turns</Text>
           <View style={styles.avatarRow}>
-            {people.map((person) => {
-              const active = selected.includes(person.initial);
+            {members.map((member) => {
+              const active = selected.includes(member.id);
               return (
                 <Pressable
-                  key={person.initial}
-                  onPress={() => toggleSelected(person.initial)}
+                  key={member.id}
+                  onPress={() => toggleSelected(member.id)}
                   style={styles.avatarOption}
                 >
-                  <Avatar initial={person.initial} variant={active ? 'solid' : 'outline'} size={44} />
-                  <Text style={active ? styles.avatarLabel : styles.avatarLabelMuted}>{person.name}</Text>
+                  <Avatar
+                    initial={member.display_name.charAt(0).toUpperCase()}
+                    variant={active ? 'solid' : 'outline'}
+                    size={44}
+                  />
+                  <Text style={active ? styles.avatarLabel : styles.avatarLabelMuted}>
+                    {member.display_name}
+                  </Text>
                 </Pressable>
               );
             })}
@@ -104,7 +148,13 @@ export default function CreateRotationScreen() {
           </Pressable>
         </Card>
 
-        <PrimaryButton label="Create rotation" onPress={() => navigation.goBack()} />
+        {error && <Text style={styles.errorText}>{error}</Text>}
+
+        {submitting ? (
+          <ActivityIndicator color={colors.primary} />
+        ) : (
+          <PrimaryButton label="Create rotation" onPress={handleSubmit} />
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -163,6 +213,7 @@ const styles = StyleSheet.create({
   avatarRow: {
     flexDirection: 'row',
     gap: spacing.lg,
+    flexWrap: 'wrap',
   },
   avatarOption: {
     alignItems: 'center',
@@ -216,5 +267,11 @@ const styles = StyleSheet.create({
   },
   switchThumbOn: {
     alignSelf: 'flex-end',
+  },
+  errorText: {
+    fontFamily: fontFamily.regular,
+    fontSize: 13,
+    color: colors.error,
+    textAlign: 'center',
   },
 });

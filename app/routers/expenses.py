@@ -16,6 +16,19 @@ async def _assert_member(conn, household_id, uid) -> None:
     if not requester:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Not a member of this household")
 
+async def _assert_household_members(conn, household_id, member_ids) -> None:
+    if not member_ids:
+        return
+    rows = await conn.fetch(
+        "SELECT id FROM members WHERE household_id=$1 AND id = ANY($2::uuid[])",
+        household_id, list(member_ids),
+    )
+    found_ids = {r["id"] for r in rows}
+    missing = set(member_ids) - found_ids
+    if missing:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "All participants must be members of this household")
+
+    
 async def _fetch_expense_out(conn, expense_id) -> dict:
     expense = await conn.fetchrow(
         "SELECT id, name, category, total_amount, s3_key, created_at FROM expenses WHERE id=$1", expense_id
@@ -42,6 +55,8 @@ async def scan_receipt(household_id: str, file: UploadFile = File(...), uid: str
 async def create_expense(household_id: str, body: ExpenseCreate, uid: str = Depends(get_current_user)):
     async with get_pool().acquire() as conn, conn.transaction():
         await _assert_member(conn, household_id, uid)
+        member_ids = set(body.participant_ids) | {c.member_id for c in body.contributions}
+        await _assert_household_members(conn, household_id, member_ids)
 
         expense = await conn.fetchrow(
             "INSERT INTO expenses (household_id, name, category, total_amount, s3_key)"

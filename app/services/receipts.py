@@ -1,4 +1,5 @@
-import uuid 
+import re
+import uuid
 from decimal import Decimal, InvalidOperation
 import boto3
 from app.core.config import get_settings
@@ -6,7 +7,7 @@ from app.core.config import get_settings
 def _parse_total(expense_document: dict) -> Decimal | None:
     """Parse the total amount from the Textract analyze Expense response.
 
-    Textract can return the same field type multpile times at different 
+    Textract can return the same field type multiple times at different
     confidence levels, so we need to find the one with the highest confidence.
     """
     totals = [
@@ -18,12 +19,25 @@ def _parse_total(expense_document: dict) -> Decimal | None:
 
     best = max(totals, key=lambda f: f['Type']['Confidence'])
     raw_text = best['ValueDetection']['Text']
-    cleaned = raw_text.replace(',', '').replace('₦', '').strip()
+
+    # Strip everything except digits and a decimal point — covers currency
+    # symbols, "NGN", stray letters/whitespace, and other OCR noise, instead
+    # of only handling ',' and '₦' like before.
+    cleaned = re.sub(r'[^\d.]', '', raw_text)
+    if not cleaned:
+        return None
+
+    # Guard against noisy OCR producing more than one decimal point
+    # (e.g. "12.900.00") by treating everything but the last dot as a
+    # thousands separator.
+    if cleaned.count('.') > 1:
+        *whole_parts, fraction = cleaned.split('.')
+        cleaned = ''.join(whole_parts) + '.' + fraction
+
     try:
-        total = Decimal(cleaned)
-    except (InvalidOperation, TypeError):
-        raise ValueError("Invalid total amount in expense document")
-    return total
+        return Decimal(cleaned)
+    except InvalidOperation:
+        return None
 
 def process_receipt(image_bytes: bytes, filename_hint: str = "jpg") -> dict:
     """Upload a receipt photo to S3 and extract its total via Textract.

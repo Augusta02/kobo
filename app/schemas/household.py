@@ -1,6 +1,7 @@
 from datetime import datetime
 from uuid import UUID
 from pydantic import BaseModel
+from decimal import Decimal
 
 class HouseholdCreate(BaseModel):
     name: str
@@ -26,3 +27,8 @@ class InviteOut(BaseModel):
 
 class InviteAccept(BaseModel):
     display_name: str
+
+class BalanceOut(BaseModel):
+    from_member_id: UUID
+    to_member_id: UUID
+    amount: Decimal
